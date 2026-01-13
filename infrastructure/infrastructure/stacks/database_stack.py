@@ -14,7 +14,7 @@ class DatabaseStack(Stack):
     - Orders: Main order data
     - Products: Product catalog
     - Inventory: Multi-warehouse inventory with optimistic locking
-    - OrderEvents: Event sourcing table for order lifecycle
+    - Event sourcing handled by Step Functions execution history
     """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
@@ -29,7 +29,9 @@ class DatabaseStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.DESTROY,  # Change to RETAIN for production
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
             stream=dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
         )
 
@@ -66,7 +68,9 @@ class DatabaseStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.DESTROY,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
         )
 
         # GSI for querying products by category
@@ -90,7 +94,9 @@ class DatabaseStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.DESTROY,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
         )
 
         # GSI for querying inventory by product across all warehouses
@@ -103,22 +109,6 @@ class DatabaseStack(Stack):
                 name="warehouseId", type=dynamodb.AttributeType.STRING
             ),
             projection_type=dynamodb.ProjectionType.ALL,
-        )
-
-        # OrderEvents Table (Event Sourcing)
-        self.order_events_table = dynamodb.Table(
-            self,
-            "OrderEventsTable",
-            partition_key=dynamodb.Attribute(
-                name="PK", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="SK", type=dynamodb.AttributeType.STRING
-            ),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,
-            point_in_time_recovery=True,
-            stream=dynamodb.StreamViewType.NEW_IMAGE,
         )
 
         # Idempotency Table (for payment deduplication)

@@ -15,23 +15,6 @@ export enum OrderStatus {
   }
   
   /**
-   * Order Event Types
-   * Events for event sourcing - tracks every state change
-   */
-  export enum OrderEventType {
-    ORDER_CREATED = 'ORDER_CREATED',
-    INVENTORY_RESERVED = 'INVENTORY_RESERVED',
-    INVENTORY_RELEASED = 'INVENTORY_RELEASED',
-    PAYMENT_INITIATED = 'PAYMENT_INITIATED',
-    PAYMENT_CONFIRMED = 'PAYMENT_CONFIRMED',
-    PAYMENT_FAILED = 'PAYMENT_FAILED',
-    SHIPPING_ALLOCATED = 'SHIPPING_ALLOCATED',
-    ORDER_SHIPPED = 'ORDER_SHIPPED',
-    ORDER_DELIVERED = 'ORDER_DELIVERED',
-    ORDER_CANCELLED = 'ORDER_CANCELLED',
-  }
-  
-  /**
    * Product Category
    */
   export enum ProductCategory {
@@ -67,7 +50,12 @@ export enum OrderStatus {
     totalAmount: number;                // Total order amount
     status: OrderStatus;                // Current order status
     shippingAddress: Address;           // Delivery address
+
     paymentIntentId?: string;           // Stripe payment intent ID
+    paymentStatus?: 'pending' | 'succeeded' | 'failed' | 'refunded';  // Payment status
+    paymentMethod?: string;             // Payment method (e.g., "visa ...4242")
+    paymentFailureReason?: string;      // Reason if payment failed
+
     trackingNumber?: string;            // Shipping tracking number
     warehouseId?: string;               // Warehouse fulfilling the order
     createdAt: string;                  // ISO timestamp
@@ -114,20 +102,6 @@ export enum OrderStatus {
     reserved: number;                   // Reserved quantity (pending orders)
     version: number;                    // Version for optimistic locking
     updatedAt: string;                  // ISO timestamp
-  }
-  
-  /**
-   * Order Event
-   * Event sourcing - append-only log of order changes
-   */
-  export interface OrderEvent {
-    eventId: string;                    // Unique event ID (UUID)
-    orderId: string;                    // Order reference
-    eventType: OrderEventType;          // Type of event
-    timestamp: string;                  // ISO timestamp
-    payload: Record<string, any>;       // Event-specific data
-    userId?: string;                    // User who triggered event
-    metadata?: Record<string, any>;     // Additional context
   }
   
   /**
@@ -185,18 +159,6 @@ export enum OrderStatus {
     reserved: number;
     version: number;
     updatedAt: string;
-  }
-  
-  export interface DynamoDBOrderEventItem {
-    PK: string;                         // orderId
-    SK: string;                         // timestamp#eventId
-    eventId: string;
-    orderId: string;
-    eventType: OrderEventType;
-    timestamp: string;
-    payload: Record<string, any>;
-    userId?: string;
-    metadata?: Record<string, any>;
   }
   
   export interface DynamoDBIdempotencyItem {

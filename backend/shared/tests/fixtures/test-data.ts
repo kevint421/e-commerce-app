@@ -2,9 +2,7 @@ import {
     Order,
     Product,
     Inventory,
-    OrderEvent,
     OrderStatus,
-    OrderEventType,
     ProductCategory,
     OrderItem,
     Address,
@@ -66,18 +64,6 @@ import {
     updatedAt: TEST_TIMESTAMP,
   };
   
-  export const mockOrderEvent: OrderEvent = {
-    eventId: 'event-test-123',
-    orderId: 'order-test-123',
-    eventType: OrderEventType.ORDER_CREATED,
-    timestamp: TEST_TIMESTAMP,
-    payload: {
-      orderId: 'order-test-123',
-      customerId: 'customer-test-456',
-      totalAmount: 3998,
-    },
-  };
-  
   /**
    * Factory functions for creating test data with overrides
    */
@@ -99,13 +85,6 @@ import {
   export function createMockInventory(overrides?: Partial<Inventory>): Inventory {
     return {
       ...mockInventory,
-      ...overrides,
-    };
-  }
-  
-  export function createMockOrderEvent(overrides?: Partial<OrderEvent>): OrderEvent {
-    return {
-      ...mockOrderEvent,
       ...overrides,
     };
   }

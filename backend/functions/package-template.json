@@ -1,0 +1,17 @@
+{
+    "name": "lambda-function",
+    "version": "1.0.0",
+    "description": "Lambda function",
+    "main": "index.js",
+    "scripts": {
+      "build": "tsc"
+    },
+    "dependencies": {
+      "ecommerce-backend-shared": "file:../../shared"
+    },
+    "devDependencies": {
+      "@types/aws-lambda": "^8.10.147",
+      "@types/node": "^22.10.7",
+      "typescript": "^5.7.3"
+    }
+  }

@@ -19,7 +19,7 @@ class DynamoDBClientManager {
   static getClient(): DynamoDBDocumentClient {
     if (!this.instance) {
       const client = new DynamoDBClient({
-        region: process.env.AWS_REGION || 'us-east-1',
+        region: process.env.AWS_REGION || 'us-east-2',
       });
 
       this.instance = DynamoDBDocumentClient.from(client, {
