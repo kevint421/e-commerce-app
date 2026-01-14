@@ -26,6 +26,8 @@ mkdir -p infrastructure/lambda-layer/nodejs/node_modules/ecommerce-backend-share
 cp -r backend/shared/dist/* infrastructure/lambda-layer/nodejs/node_modules/ecommerce-backend-shared/
 cp backend/shared/package.json infrastructure/lambda-layer/nodejs/node_modules/ecommerce-backend-shared/
 
+cp -r backend/shared/node_modules/* infrastructure/lambda-layer/nodejs/node_modules/
+
 # List of Lambda functions
 declare -a functions=(
     "backend/functions/api/create-order"

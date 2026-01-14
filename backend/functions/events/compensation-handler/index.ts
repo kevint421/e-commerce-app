@@ -5,6 +5,7 @@ import {
   OrderStatus,
   logger,
   getCurrentTimestamp,
+  createRefund,
 } from 'ecommerce-backend-shared';
 
 // Initialize repositories

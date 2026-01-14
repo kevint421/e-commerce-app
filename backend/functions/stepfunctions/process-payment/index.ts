@@ -5,6 +5,7 @@ import {
   OrderStatus,
   logger,
   getCurrentTimestamp,
+  createAndConfirmPayment,
 } from 'ecommerce-backend-shared';
 
 const orderRepo = new OrderRepository();
