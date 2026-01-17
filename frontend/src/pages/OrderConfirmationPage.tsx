@@ -168,7 +168,7 @@ export function OrderConfirmationPage() {
           </Link>
         </div>
 
-        {/* Email Note */}
+        {/* Email Msg */}
         <div className="mt-8 text-center">
           <p className="text-sm text-gray-600">
             📧 A confirmation email has been sent to your email address.

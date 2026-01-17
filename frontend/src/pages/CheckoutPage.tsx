@@ -105,7 +105,7 @@ export function CheckoutPage() {
                 </div>
               </div>
 
-              {/* Security Note */}
+              {/* Security Msg */}
               <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-md">
                 <p className="text-xs text-green-800">
                   🔒 <strong>Secure Payment</strong> - Your payment information is encrypted and secure.

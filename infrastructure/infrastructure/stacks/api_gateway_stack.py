@@ -48,7 +48,7 @@ class ApiGatewayStack(Stack):
                 throttling_burst_limit=200,  # Burst capacity
             ),
             default_cors_preflight_options=apigw.CorsOptions(
-                allow_origins=apigw.Cors.ALL_ORIGINS,  # In production, specify domain
+                allow_origins=apigw.Cors.ALL_ORIGINS,  # TODO: In production, specify your domain
                 allow_methods=apigw.Cors.ALL_METHODS,
                 allow_headers=[
                     "Content-Type",
@@ -164,6 +164,21 @@ class ApiGatewayStack(Stack):
         inventory_product_resource.add_method(
             "GET",
             check_inventory_integration,
+        )
+
+        # ===== /webhooks Resource =====
+        webhooks_resource = self.api.root.add_resource("webhooks")
+        stripe_webhook_resource = webhooks_resource.add_resource("stripe")
+
+        # POST /webhooks/stripe - Stripe Webhook Handler
+        stripe_webhook_integration = apigw.LambdaIntegration(
+            api_functions["stripe_webhook"],
+            proxy=True,
+        )
+
+        stripe_webhook_resource.add_method(
+            "POST",
+            stripe_webhook_integration,
         )
 
         # ===== Outputs =====

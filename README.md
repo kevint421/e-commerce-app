@@ -6,11 +6,18 @@ An event-driven e-commerce order fulfillment system built with AWS serverless se
 
 This system implements a distributed architecture using:
 - **Saga Pattern** for distributed transactions
-- **Fan-Out Pattern** for parallel processing
 - **Competing Consumer Pattern** for scalability
-- **Dead Letter Queue (DLQ)** for fault tolerance
 - **Idempotency** for reliability
-- **Event Sourcing** for audit trail
+
+## Project Goals
+
+This project was built to practice and demonstrate:
+- Distributed workflow orchestration
+- Asynchronous payment processing with Stripe
+- Saga-based failure handling and compensation
+- Idempotent backend design
+- Cloud-native observability and infrastructure-as-code
+- Demo-friendly deployment strategies with no real payments processed
 
 ## Tech Stack
 
@@ -27,13 +34,11 @@ This system implements a distributed architecture using:
 ### Backend
 - AWS API Gateway (REST API)
 - AWS Lambda (serverless compute)
-- Amazon EventBridge (event bus)
 - AWS Step Functions (saga orchestration)
-- Amazon SQS (message queues)
 - Amazon SNS (pub/sub notifications)
 - Amazon DynamoDB (NoSQL database)
 - Amazon SES (email delivery)
-- Stripe API (payments)
+- Stripe API (payments, test mode)
 
 ### Infrastructure
 - AWS CDK (Python)
@@ -98,12 +103,6 @@ cd ../frontend
 npm install
 ```
 
-4. Set up environment variables
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
 ### Local Development
 
 3. Start frontend development server
@@ -118,21 +117,6 @@ Deploy to AWS:
 ```bash
 cd infrastructure
 cdk deploy --all --profile <your-aws-profile>
-```
-
-## Testing
-
-### Backend Tests
-```bash
-cd backend
-npm test
-```
-
-### Frontend Tests
-```bash
-cd frontend
-npm test              # Unit tests
-npm run test:e2e      # E2E tests
 ```
 
 ## Monitoring

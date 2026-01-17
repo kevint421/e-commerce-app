@@ -52,7 +52,7 @@ export enum OrderStatus {
     shippingAddress: Address;           // Delivery address
 
     paymentIntentId?: string;           // Stripe payment intent ID
-    paymentStatus?: 'pending' | 'succeeded' | 'failed' | 'refunded';  // Payment status
+    paymentStatus?: 'pending' | 'succeeded' | 'failed' | 'refunded' | 'canceled';  // Payment status
     paymentMethod?: string;             // Payment method (e.g., "visa ...4242")
     paymentFailureReason?: string;      // Reason if payment failed
 

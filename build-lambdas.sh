@@ -34,6 +34,7 @@ declare -a functions=(
     "backend/functions/api/get-order"
     "backend/functions/api/list-products"
     "backend/functions/api/check-inventory"
+    "backend/functions/api/stripe-webhook"
     "backend/functions/events/compensation-handler"
     "backend/functions/stepfunctions/reserve-inventory"
     "backend/functions/stepfunctions/process-payment"

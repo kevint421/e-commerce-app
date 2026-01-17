@@ -151,6 +151,29 @@ export class OrderRepository {
   }
 
   /**
+   * Update order payment information
+   * Convenience method for updating payment-related fields
+   */
+  async updatePaymentInfo(
+    orderId: string,
+    paymentInfo: {
+      paymentIntentId?: string;
+      paymentStatus?: 'pending' | 'succeeded' | 'failed' | 'refunded' | 'canceled';
+      paymentMethod?: string;
+      paymentFailureReason?: string;
+    }
+  ): Promise<Order> {
+    return this.update(orderId, paymentInfo);
+  }
+
+  /**
+   * Get order by ID (alias for backward compatibility)
+   */
+  async get(orderId: string): Promise<Order | null> {
+    return this.getById(orderId);
+  }
+
+  /**
    * Get orders by customer ID
    */
   async getByCustomerId(

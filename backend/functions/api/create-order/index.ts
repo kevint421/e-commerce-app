@@ -1,9 +1,9 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   OrderRepository,
   ProductRepository,
   InventoryRepository,
+  createPaymentIntent,
   IdempotencyService,
   OrderStatus,
   Order,
@@ -21,15 +21,13 @@ const productRepo = new ProductRepository();
 const inventoryRepo = new InventoryRepository();
 const idempotency = new IdempotencyService();
 
-// Initialize Step Functions client
-const sfnClient = new SFNClient({ region: process.env.AWS_REGION || 'us-east-2' });
-const STATE_MACHINE_ARN = process.env.STATE_MACHINE_ARN;
-
 /**
  * Create Order Lambda Handler
  * POST /orders
  * 
- * Creates order and triggers Step Functions saga
+ * Creates a new order and Stripe Payment Intent, returns clientSecret
+ * The order saga is NOT started yet - it will be triggered by the webhook
+ * after the frontend confirms the payment.
  */
 export const handler = async (
   event: APIGatewayProxyEvent
@@ -69,7 +67,7 @@ export const handler = async (
     });
 
     // Create order with idempotency
-    const order = await idempotency.executeOnce(
+    const result = await idempotency.executeOnce(
       IdempotencyService.generateOrderKey(orderId, 'create'),
       'create-order',
       async () => {
@@ -78,120 +76,103 @@ export const handler = async (
         const products = await productRepo.getByIds(productIds);
 
         if (products.length !== productIds.length) {
-          const foundIds = products.map((p) => p.productId);
-          const missingIds = productIds.filter((id) => !foundIds.includes(id));
-          throw new Error(`Products not found: ${missingIds.join(', ')}`);
+          throw new Error('One or more products not found');
         }
 
-        const inactiveProducts = products.filter((p) => !p.active);
-        if (inactiveProducts.length > 0) {
-          throw new Error(
-            `Products not available: ${inactiveProducts.map((p) => p.name).join(', ')}`
-          );
-        }
-
-        // 2. Check inventory availability (fast check before creating order)
-        for (const item of orderData.items) {
-          const inventoryList = await inventoryRepo.getByProductId(item.productId);
-          const totalAvailable = inventoryList.items.reduce(
-            (sum, inv) => sum + (inv.quantity - inv.reserved),
-            0
-          );
-
-          if (totalAvailable < item.quantity) {
-            const product = products.find((p) => p.productId === item.productId);
-            throw new Error(
-              `Insufficient inventory for ${product?.name}. Available: ${totalAvailable}, Requested: ${item.quantity}`
-            );
+        // Check each product is active
+        for (const product of products) {
+          if (!product.active) {
+            throw new Error(`Product ${product.name} is not available`);
           }
         }
 
-        // 3. Enrich items with product details and calculate totals
+        // 2. Build order items with current prices
+        let totalAmount = 0;
         const enrichedItems = orderData.items.map((item: any) => {
-          const product = products.find((p) => p.productId === item.productId)!;
+          const product = products.find((p) => p.productId === item.productId);
+          if (!product) {
+            throw new Error(`Product ${item.productId} not found`);
+          }
+
+          const itemTotal = product.price * item.quantity;
+          totalAmount += itemTotal;
+
           return {
             productId: product.productId,
             productName: product.name,
             quantity: item.quantity,
             pricePerUnit: product.price,
-            totalPrice: product.price * item.quantity,
+            totalPrice: itemTotal,
           };
         });
 
-        const totalAmount = enrichedItems.reduce((sum, item) => sum + item.totalPrice, 0);
+        // 3. Check inventory availability (don't reserve yet)
+        for (const item of enrichedItems) {
+          const hasStock = await inventoryRepo.hasStock(
+            item.productId,
+            item.quantity
+          );
+          if (!hasStock) {
+            throw new Error(
+              `Insufficient inventory for product: ${item.productName}`
+            );
+          }
+        }
 
-        // 4. Create order in database (status: PENDING)
-        const newOrder: Order = {
+        // 4. Create Stripe Payment Intent
+        // This generates the clientSecret that frontend will use
+        logger.info('Creating Stripe Payment Intent', { totalAmount });
+        
+        const paymentIntent = await createPaymentIntent(
+          totalAmount,
+          'usd',
+          {
+            orderId,
+            customerId: orderData.customerId,
+          }
+        );
+
+        logger.info('Payment Intent created', {
+          paymentIntentId: paymentIntent.id,
+          clientSecret: paymentIntent.client_secret?.substring(0, 20) + '...',
+        });
+
+        // 5. Create order in database
+        const newOrder: Omit<Order, 'createdAt' | 'updatedAt'> = {
           orderId,
           customerId: orderData.customerId,
           items: enrichedItems,
           totalAmount,
-          status: OrderStatus.PENDING,
+          status: OrderStatus.PENDING, // Will transition after payment
           shippingAddress: orderData.shippingAddress,
-          createdAt: getCurrentTimestamp(),
-          updatedAt: getCurrentTimestamp(),
+          paymentIntentId: paymentIntent.id,
+          paymentStatus: 'pending',
         };
 
-        await orderRepo.create(newOrder);
+        const createdOrder = await orderRepo.create(newOrder);
 
         logger.info('Order created in database', {
           orderId,
           totalAmount,
-          status: newOrder.status,
+          status: createdOrder.status,
+          paymentIntentId: paymentIntent.id,
         });
 
-        return newOrder;
+        return {
+          order: createdOrder,
+          clientSecret: paymentIntent.client_secret,
+        };
       }
     );
 
-    // Trigger Step Functions state machine
-    // (Replaces EventBridge publishing)
-    if (!STATE_MACHINE_ARN) {
-      throw new Error('STATE_MACHINE_ARN environment variable not set');
-    }
+    // saga will be triggered by the Stripe webhook when payment succeeds
 
-    try {
-      const executionName = `order-${orderId}`;
-      
-      await sfnClient.send(
-        new StartExecutionCommand({
-          stateMachineArn: STATE_MACHINE_ARN,
-          name: executionName,
-          input: JSON.stringify({
-            orderId: order.orderId,
-          }),
-        })
-      );
-
-      logger.info('Step Functions execution started', {
-        orderId: order.orderId,
-        executionName,
-        stateMachineArn: STATE_MACHINE_ARN,
-      });
-    } catch (sfnError: any) {
-      logger.error('Failed to start Step Functions execution', sfnError, {
-        orderId: order.orderId,
-      });
-      
-      // Order is created but workflow didn't start - this is a critical error
-      // In production, might want to:
-      // 1. Update order status to ERROR
-      // 2. Send alert to operations team
-      // 3. Retry logic or manual intervention
-      
-      throw new Error(`Order created but workflow failed to start: ${sfnError.message}`);
-    }
-
-    // 7. Return success response
+    // 7. Return success response with clientSecret
     return successResponse(201, {
-      message: 'Order created successfully',
-      order: {
-        orderId: order.orderId,
-        status: order.status,
-        totalAmount: order.totalAmount,
-        items: order.items,
-        createdAt: order.createdAt,
-      },
+      orderId: result.order.orderId,
+      clientSecret: result.clientSecret,
+      totalAmount: result.order.totalAmount,
+      status: result.order.status,
     });
   } catch (error: any) {
     logger.error('Failed to create order', error);
@@ -201,11 +182,15 @@ export const handler = async (
     }
 
     if (error.message.includes('not found') || error.message.includes('not available')) {
-      return errorResponse(404, error.message);
+      return errorResponse(400, error.message);
     }
 
     if (error.message.includes('Insufficient inventory')) {
-      return errorResponse(409, error.message);
+      return errorResponse(400, error.message);
+    }
+
+    if (error.message.includes('already completed')) {
+      return errorResponse(409, 'Order already exists');
     }
 
     return errorResponse(500, 'Internal server error');
@@ -215,14 +200,16 @@ export const handler = async (
 /**
  * Helper: Success response
  */
-function successResponse(statusCode: number, body: any): APIGatewayProxyResult {
+function successResponse(statusCode: number, data: any): APIGatewayProxyResult {
   return {
     statusCode,
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'OPTIONS,POST,GET',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(data),
   };
 }
 
@@ -235,10 +222,12 @@ function errorResponse(statusCode: number, message: string): APIGatewayProxyResu
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'OPTIONS,POST,GET',
     },
     body: JSON.stringify({
       error: message,
-      timestamp: new Date().toISOString(),
+      timestamp: getCurrentTimestamp(),
     }),
   };
 }

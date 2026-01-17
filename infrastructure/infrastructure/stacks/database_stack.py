@@ -28,7 +28,7 @@ class DatabaseStack(Stack):
                 name="PK", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,  # Change to RETAIN for production
+            removal_policy=RemovalPolicy.DESTROY,  # TODO: Change to RETAIN for production
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
             ),

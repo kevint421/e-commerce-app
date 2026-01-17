@@ -56,7 +56,7 @@ export interface Order {
   
   // Payment fields
   paymentIntentId?: string;
-  paymentStatus?: 'pending' | 'succeeded' | 'failed' | 'refunded';
+  paymentStatus?: 'pending' | 'succeeded' | 'failed' | 'refunded' | 'canceled';
   paymentMethod?: string;
   paymentFailureReason?: string;
   

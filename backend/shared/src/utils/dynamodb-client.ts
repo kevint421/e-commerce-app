@@ -254,8 +254,8 @@ export async function batchGet<T>(
   tableName: string,
   keys: Record<string, any>[]
 ): Promise<T[]> {
-  // Note: basic implementation
-  // In production: use BatchGetItemCommand with proper error handling
+  // basic implementation
+  // TODO: use BatchGetItemCommand with proper error handling
   const results: T[] = [];
 
   for (const key of keys) {

@@ -280,7 +280,7 @@ import {
   
     /**
      * Get products with low stock (needs inventory data)
-     * Note: This would typically join with inventory table
+     * TODO: This would typically join with inventory table
      * For now, just returns active products
      */
     async getActiveProducts(limit: number = 100): Promise<Product[]> {

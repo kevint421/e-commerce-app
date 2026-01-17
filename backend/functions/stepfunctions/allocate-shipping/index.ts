@@ -46,13 +46,7 @@ export const handler: Handler<AllocateShippingInput, AllocateShippingOutput> = a
     throw new Error(`Order must be in PAYMENT_CONFIRMED status, currently: ${order.status}`);
   }
 
-  // TODO: integrate with shipping provider API?
-  // const shipment = await shippo.transactions.create({
-  //   shipment: {...},
-  //   carrier_account: 'usps_account',
-  //   servicelevel_token: 'usps_priority',
-  // });
-
+  // integrate with shipping provider API for real app, use mock for this demo
   // Mock shipping allocation
   await new Promise((resolve) => setTimeout(resolve, 800));
 
