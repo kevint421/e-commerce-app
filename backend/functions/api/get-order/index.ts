@@ -10,8 +10,8 @@ const orderRepo = new OrderRepository();
 /**
  * Get Order Lambda Handler
  * GET /orders/{orderId}
- * 
- * Retrieves order details and event history
+ *
+ * Retrieves order details
  */
 export const handler = async (
   event: APIGatewayProxyEvent
@@ -37,19 +37,6 @@ export const handler = async (
       return errorResponse(404, 'Order not found');
     }
 
-    // Optionally fetch event history if requested
-    const includeEvents = event.queryStringParameters?.includeEvents === 'true';
-    let events = null;
-
-    if (includeEvents) {
-      const eventHistory = await eventRepo.getByOrderId(orderId);
-      events = eventHistory.items.map((e) => ({
-        eventType: e.eventType,
-        timestamp: e.timestamp,
-        payload: e.payload,
-      }));
-    }
-
     logger.info('Order retrieved successfully', {
       orderId,
       status: order.status,
@@ -57,7 +44,6 @@ export const handler = async (
 
     return successResponse(200, {
       order,
-      ...(events && { events }),
     });
   } catch (error: any) {
     logger.error('Failed to get order', error);

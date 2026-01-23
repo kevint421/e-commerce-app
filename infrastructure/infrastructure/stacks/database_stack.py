@@ -9,11 +9,13 @@ from constructs import Construct
 class DatabaseStack(Stack):
     """
     DatabaseStack defines all DynamoDB tables for the e-commerce system.
-    
+
     Tables:
     - Orders: Main order data
     - Products: Product catalog
     - Inventory: Multi-warehouse inventory with optimistic locking
+    - Idempotency: Prevents duplicate operations (especially payments)
+    - AdminSessions: Stores admin authentication session tokens with TTL
     - Event sourcing handled by Step Functions execution history
     """
 
@@ -28,7 +30,7 @@ class DatabaseStack(Stack):
                 name="PK", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,  # TODO: Change to RETAIN for production
+            removal_policy=RemovalPolicy.DESTROY,
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
             ),
@@ -121,4 +123,16 @@ class DatabaseStack(Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.DESTROY,
             time_to_live_attribute="expiresAt",  # Auto-cleanup old keys
+        )
+
+        # Admin Sessions Table (for authentication tokens)
+        self.admin_sessions_table = dynamodb.Table(
+            self,
+            "AdminSessionsTable",
+            partition_key=dynamodb.Attribute(
+                name="sessionToken", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.DESTROY,
+            time_to_live_attribute="expiresAt",  # Auto-cleanup expired sessions
         )

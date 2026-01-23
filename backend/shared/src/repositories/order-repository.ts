@@ -240,6 +240,38 @@ export class OrderRepository {
   }
 
   /**
+   * List all orders (admin function - uses scan)
+   * WARNING: Expensive operation on large tables
+   */
+  async listAll(options: QueryOptions = {}): Promise<PaginatedResult<Order>> {
+    try {
+      const { ScanCommand } = await import('@aws-sdk/lib-dynamodb');
+
+      const response = await dynamoClient.send(
+        new ScanCommand({
+          TableName: this.tableName,
+          Limit: options.limit,
+          ExclusiveStartKey: options.lastEvaluatedKey,
+        })
+      );
+
+      const items = (response.Items || []).map((item) => {
+        const { PK, ...order } = item as DynamoDBOrderItem;
+        return order as Order;
+      });
+
+      // Sort by createdAt descending (newest first)
+      items.sort((a, b) => {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+
+      return buildPaginatedResponse(items, response.LastEvaluatedKey);
+    } catch (error) {
+      return handleDynamoDBError(error);
+    }
+  }
+
+  /**
    * Delete order (soft delete by setting status)
    */
   async cancel(orderId: string): Promise<Order> {

@@ -43,10 +43,32 @@ export const handler: Handler<ReserveInventoryInput, ReserveInventoryOutput> = a
     throw new Error(`Order not found: ${orderId}`);
   }
 
-  // Check if already processed
+  // Check if inventory is already reserved (idempotency)
+  if (order.status === OrderStatus.INVENTORY_RESERVED) {
+    logger.info('Inventory already reserved, skipping reservation', {
+      orderId,
+      status: order.status,
+    });
+
+    // Extract warehouse info from existing order items
+    const reservedItems = order.items.map((item: any) => ({
+      productId: item.productId,
+      productName: item.productName,
+      quantity: item.quantity,
+      warehouseId: item.warehouseId || 'warehouse-east', // fallback to default
+    }));
+
+    return {
+      orderId,
+      status: OrderStatus.INVENTORY_RESERVED,
+      reservedItems,
+    };
+  }
+
+  // Check if in correct status for new reservation
   if (order.status !== OrderStatus.PENDING) {
-    logger.info('Order already processed', { status: order.status });
-    throw new Error(`Order already in ${order.status} status`);
+    logger.error('Order in unexpected status', { status: order.status });
+    throw new Error(`Cannot reserve inventory: Order is in ${order.status} status`);
   }
 
   const reservedItems: Array<{
@@ -156,8 +178,21 @@ export const handler: Handler<ReserveInventoryInput, ReserveInventoryOutput> = a
     }
   }
 
-  // Update order status
+  // Update order items with warehouse IDs and update status
+  // This is critical for compensation handler to know where to release inventory
+  const updatedItems = order.items.map((item: any) => {
+    const reservedItem = reservedItems.find(r => r.productId === item.productId);
+    if (reservedItem) {
+      return {
+        ...item,
+        warehouseId: reservedItem.warehouseId,
+      };
+    }
+    return item;
+  });
+
   await orderRepo.update(orderId, {
+    items: updatedItems,
     status: OrderStatus.INVENTORY_RESERVED,
     updatedAt: getCurrentTimestamp(),
   });

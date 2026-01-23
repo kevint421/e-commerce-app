@@ -35,11 +35,18 @@ declare -a functions=(
     "backend/functions/api/list-products"
     "backend/functions/api/check-inventory"
     "backend/functions/api/stripe-webhook"
+    "backend/functions/api/admin-auth"
+    "backend/functions/api/admin-authorizer"
+    "backend/functions/api/admin-list-orders"
+    "backend/functions/api/admin-cancel-order"
+    "backend/functions/api/admin-update-inventory"
+    "backend/functions/api/admin-analytics"
     "backend/functions/events/compensation-handler"
     "backend/functions/stepfunctions/reserve-inventory"
     "backend/functions/stepfunctions/process-payment"
     "backend/functions/stepfunctions/allocate-shipping"
     "backend/functions/stepfunctions/send-notification"
+    "backend/functions/scheduled/cleanup-abandoned-carts"
 )
 
 # Build each Lambda function

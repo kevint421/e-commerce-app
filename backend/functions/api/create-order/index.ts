@@ -24,10 +24,14 @@ const idempotency = new IdempotencyService();
 /**
  * Create Order Lambda Handler
  * POST /orders
- * 
- * Creates a new order and Stripe Payment Intent, returns clientSecret
- * The order saga is NOT started yet - it will be triggered by the webhook
- * after the frontend confirms the payment.
+ *
+ * Flow:
+ * 1. Validates products and checks inventory availability (doesn't reserve)
+ * 2. Creates Stripe Payment Intent and returns clientSecret to frontend
+ * 3. Creates order with PENDING status (no inventory reserved yet)
+ * 4. Frontend confirms payment with Stripe
+ * 5. Stripe webhook triggers Step Functions
+ * 6. Step Functions reserves inventory, processes payment, allocates shipping
  */
 export const handler = async (
   event: APIGatewayProxyEvent
@@ -103,20 +107,39 @@ export const handler = async (
             quantity: item.quantity,
             pricePerUnit: product.price,
             totalPrice: itemTotal,
+            warehouseId: undefined as string | undefined, // Will be set during reservation
           };
         });
 
         // 3. Check inventory availability (don't reserve yet)
+        // Actual reservation happens in Step Functions after payment confirmation
+        // This pre-check provides fast feedback to customers about stock availability
         for (const item of enrichedItems) {
-          const hasStock = await inventoryRepo.hasStock(
+          logger.info('Checking inventory availability for item', {
+            productId: item.productId,
+            quantity: item.quantity,
+          });
+
+          // Check if any warehouse has available stock
+          const warehouse = await inventoryRepo.findWarehouseWithStock(
             item.productId,
             item.quantity
           );
-          if (!hasStock) {
+
+          if (!warehouse) {
             throw new Error(
               `Insufficient inventory for product: ${item.productName}`
             );
           }
+
+          logger.info('Inventory available', {
+            productId: item.productId,
+            warehouseId: warehouse.warehouseId,
+            available: warehouse.quantity - warehouse.reserved,
+            needed: item.quantity,
+          });
+
+          // Note: warehouseId stays undefined - will be assigned during actual reservation in Step Functions
         }
 
         // 4. Create Stripe Payment Intent
@@ -138,12 +161,13 @@ export const handler = async (
         });
 
         // 5. Create order in database
+        // Note: Status is PENDING - inventory will be reserved by Step Functions after payment
         const newOrder: Omit<Order, 'createdAt' | 'updatedAt'> = {
           orderId,
           customerId: orderData.customerId,
           items: enrichedItems,
           totalAmount,
-          status: OrderStatus.PENDING, // Will transition after payment
+          status: OrderStatus.PENDING, // Inventory will be reserved in Step Functions
           shippingAddress: orderData.shippingAddress,
           paymentIntentId: paymentIntent.id,
           paymentStatus: 'pending',
@@ -212,6 +236,7 @@ function successResponse(statusCode: number, data: any): APIGatewayProxyResult {
     body: JSON.stringify(data),
   };
 }
+
 
 /**
  * Helper: Error response

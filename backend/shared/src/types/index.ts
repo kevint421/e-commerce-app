@@ -1,15 +1,15 @@
 /**
  * Order Status Enum
  * Represents the lifecycle of an order through the fulfillment process
+ *
+ * Note: SHIPPING_ALLOCATED is the final successful state (using mock shipping for demo)
  */
 export enum OrderStatus {
     PENDING = 'PENDING',                    // Order created, awaiting processing
     INVENTORY_RESERVED = 'INVENTORY_RESERVED', // Inventory allocated
     PAYMENT_PROCESSING = 'PAYMENT_PROCESSING', // Payment being processed
     PAYMENT_CONFIRMED = 'PAYMENT_CONFIRMED',   // Payment successful
-    SHIPPING_ALLOCATED = 'SHIPPING_ALLOCATED', // Shipping label created
-    SHIPPED = 'SHIPPED',                    // Order shipped to customer
-    DELIVERED = 'DELIVERED',                // Order delivered
+    SHIPPING_ALLOCATED = 'SHIPPING_ALLOCATED', // Shipping allocated (final successful state for demo)
     CANCELLED = 'CANCELLED',                // Order cancelled
     FAILED = 'FAILED',                      // Order failed (payment/inventory)
   }
@@ -37,6 +37,7 @@ export enum OrderStatus {
     quantity: number;
     pricePerUnit: number;
     totalPrice: number;
+    warehouseId?: string;  // Warehouse that fulfilled this item
   }
   
   /**

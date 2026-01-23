@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle, Package, ArrowRight } from 'lucide-react';
@@ -6,7 +5,6 @@ import { Button } from '../components/common/Button';
 import { Spinner } from '../components/common/Spinner';
 import { ordersApi } from '../api/client';
 import { formatPrice, formatDateTime } from '../utils/format';
-import type { Order } from '../types';
 
 export function OrderConfirmationPage() {
   const [searchParams] = useSearchParams();

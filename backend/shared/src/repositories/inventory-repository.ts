@@ -104,7 +104,7 @@ export class InventoryRepository {
             TableName: this.tableName,
             Key: { PK: inventoryId },
             UpdateExpression:
-              'SET quantity = quantity - :qty, reserved = reserved + :qty, version = version + :one, updatedAt = :now',
+              'SET reserved = reserved + :qty, version = version + :one, updatedAt = :now',
             ExpressionAttributeValues: {
               ':qty': quantity,
               ':one': 1,
@@ -113,7 +113,7 @@ export class InventoryRepository {
               ':zero': 0,
             },
             ConditionExpression:
-              'version = :expectedVersion AND quantity >= :qty AND quantity >= :zero',
+              'version = :expectedVersion AND (quantity - reserved) >= :qty AND quantity >= :zero',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -151,7 +151,7 @@ export class InventoryRepository {
             TableName: this.tableName,
             Key: { PK: inventoryId },
             UpdateExpression:
-              'SET quantity = quantity + :qty, reserved = reserved - :qty, version = version + :one, updatedAt = :now',
+              'SET reserved = reserved - :qty, version = version + :one, updatedAt = :now',
             ExpressionAttributeValues: {
               ':qty': quantity,
               ':one': 1,
@@ -310,7 +310,7 @@ export class InventoryRepository {
    */
   async getTotalAvailableQuantity(productId: string): Promise<number> {
     const result = await this.getByProductId(productId);
-    return result.items.reduce((total, inv) => total + inv.quantity, 0);
+    return result.items.reduce((total, inv) => total + (inv.quantity - inv.reserved), 0);
   }
 
   /**
@@ -322,8 +322,8 @@ export class InventoryRepository {
   ): Promise<Inventory | null> {
     const result = await this.getByProductId(productId);
 
-    // Find first warehouse with sufficient available stock
-    const warehouse = result.items.find((inv) => inv.quantity >= requiredQuantity);
+    // Find first warehouse with sufficient available stock (quantity - reserved)
+    const warehouse = result.items.find((inv) => (inv.quantity - inv.reserved) >= requiredQuantity);
 
     return warehouse || null;
   }

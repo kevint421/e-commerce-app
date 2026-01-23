@@ -10,6 +10,8 @@ from aws_cdk import (
     aws_lambda_event_sources as lambda_event_sources,
     aws_iam as iam,
     aws_logs as logs,
+    aws_events as events,
+    aws_events_targets as targets,
 )
 from constructs import Construct
 
@@ -37,6 +39,7 @@ class LambdaStack(Stack):
         products_table = database_stack.products_table
         inventory_table = database_stack.inventory_table
         idempotency_table = database_stack.idempotency_table
+        admin_sessions_table = database_stack.admin_sessions_table
         
         if event_stack:
             event_bus = event_stack.event_bus
@@ -93,7 +96,7 @@ class LambdaStack(Stack):
             },
             timeout=Duration.seconds(30),
             memory_size=512,
-            # Log groups created automatically by CDK
+            tracing=_lambda.Tracing.ACTIVE,  # Enable X-Ray tracing
             description="Creates new orders and triggers Step Functions workflow",
         )
         
@@ -197,6 +200,121 @@ class LambdaStack(Stack):
 
         orders_table.grant_read_write_data(self.stripe_webhook_fn)
 
+        # ===== Admin Lambda Functions =====
+
+        # POST /admin/auth - Admin Authentication
+        # Credentials are stored in AWS Secrets Manager: ecommerce/admin/credentials
+        self.admin_auth_fn = _lambda.Function(
+            self,
+            "AdminAuthFunction",
+            runtime=_lambda.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=_lambda.Code.from_asset("../backend/functions/api/admin-auth/dist"),
+            layers=[self.shared_layer],
+            environment={
+                **common_env,
+                "ADMIN_SESSIONS_TABLE_NAME": admin_sessions_table.table_name,
+            },
+            timeout=Duration.seconds(10),
+            memory_size=256,
+            description="Admin: Simple authentication for admin dashboard",
+        )
+
+        # Grant access to admin credentials in Secrets Manager
+        self.admin_auth_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[
+                    f"arn:aws:secretsmanager:{self.region}:{self.account}:secret:ecommerce/admin/credentials-*"
+                ]
+            )
+        )
+
+        # Grant access to admin sessions table
+        admin_sessions_table.grant_read_write_data(self.admin_auth_fn)
+
+        # Lambda Authorizer - Admin Session Token Validation
+        self.admin_authorizer_fn = _lambda.Function(
+            self,
+            "AdminAuthorizerFunction",
+            runtime=_lambda.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=_lambda.Code.from_asset("../backend/functions/api/admin-authorizer/dist"),
+            environment={
+                "ADMIN_SESSIONS_TABLE_NAME": admin_sessions_table.table_name,
+            },
+            timeout=Duration.seconds(5),
+            memory_size=256,
+            description="Lambda Authorizer: Validates admin session tokens",
+        )
+
+        # Grant authorizer read access to sessions table
+        admin_sessions_table.grant_read_data(self.admin_authorizer_fn)
+
+        # GET /admin/orders - List All Orders (Admin)
+        self.admin_list_orders_fn = _lambda.Function(
+            self,
+            "AdminListOrdersFunction",
+            runtime=_lambda.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=_lambda.Code.from_asset("../backend/functions/api/admin-list-orders/dist"),
+            layers=[self.shared_layer],
+            environment=common_env,
+            timeout=Duration.seconds(30),
+            memory_size=512,
+            description="Admin: Lists all orders with filtering and pagination",
+        )
+
+        # POST /admin/orders/{orderId}/cancel - Cancel Order (Admin)
+        self.admin_cancel_order_fn = _lambda.Function(
+            self,
+            "AdminCancelOrderFunction",
+            runtime=_lambda.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=_lambda.Code.from_asset("../backend/functions/api/admin-cancel-order/dist"),
+            layers=[self.shared_layer],
+            environment=common_env,
+            timeout=Duration.seconds(30),
+            memory_size=512,
+            description="Admin: Cancels orders with refund and inventory release",
+        )
+
+        # Grant admin cancel order access to Stripe secrets for refunds
+        self.admin_cancel_order_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[f"arn:aws:secretsmanager:{self.region}:{self.account}:secret:ecommerce/stripe/*"],
+            )
+        )
+
+        # PUT /admin/inventory/{productId} - Update Inventory (Admin)
+        self.admin_update_inventory_fn = _lambda.Function(
+            self,
+            "AdminUpdateInventoryFunction",
+            runtime=_lambda.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=_lambda.Code.from_asset("../backend/functions/api/admin-update-inventory/dist"),
+            layers=[self.shared_layer],
+            environment=common_env,
+            timeout=Duration.seconds(30),
+            memory_size=512,
+            description="Admin: Updates inventory levels (set/add/subtract operations)",
+        )
+
+        # GET /admin/analytics - Analytics Dashboard (Admin)
+        self.admin_analytics_fn = _lambda.Function(
+            self,
+            "AdminAnalyticsFunction",
+            runtime=_lambda.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=_lambda.Code.from_asset("../backend/functions/api/admin-analytics/dist"),
+            layers=[self.shared_layer],
+            environment=common_env,
+            timeout=Duration.seconds(30),
+            memory_size=512,
+            description="Admin: Provides comprehensive analytics and metrics",
+        )
+
         # ===== Step Functions Task Lambda Functions =====
 
         # Reserve Inventory - Step Functions task version
@@ -249,10 +367,14 @@ class LambdaStack(Stack):
             handler="index.handler",
             code=_lambda.Code.from_asset("../backend/functions/stepfunctions/send-notification/dist"),
             layers=[self.shared_layer],
-            environment=common_env,
+            environment={
+                **common_env,
+                "SES_FROM_EMAIL": "KET126@pitt.edu",
+                "TEST_CUSTOMER_EMAIL": "kevintcolleges@gmail.com",
+            },
             timeout=Duration.seconds(30),
             memory_size=256,
-            description="Sends order confirmation notifications (Step Functions task)",
+            description="Sends order confirmation notifications via SES (Step Functions task)",
         )
 
         # Compensation Handler - Rolls back failed transactions
@@ -269,6 +391,40 @@ class LambdaStack(Stack):
             description="Handles compensation/rollback for failed sagas",
         )
 
+        # ===== Scheduled Lambda Functions =====
+
+        # Cleanup Abandoned Carts - Scheduled function to release inventory
+        self.cleanup_abandoned_carts_fn = _lambda.Function(
+            self,
+            "CleanupAbandonedCartsFunction",
+            runtime=_lambda.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=_lambda.Code.from_asset("../backend/functions/scheduled/cleanup-abandoned-carts/dist"),
+            layers=[self.shared_layer],
+            environment={
+                **common_env,
+                "ABANDONED_CART_TIMEOUT_MINUTES": "30",  # Configurable timeout
+                "SEND_REMINDER_EMAILS": "false",  # Set to "true" to enable abandoned cart reminders
+                "SES_FROM_EMAIL": "KET126@pitt.edu",
+                "TEST_CUSTOMER_EMAIL": "kevintcolleges@gmail.com",
+                "FRONTEND_URL": "https://d1fo7kayl20noe.cloudfront.net/",  # CloudFront frontend URL
+            },
+            timeout=Duration.minutes(5),  # Allow time to process many orders
+            memory_size=512,
+            description="Releases inventory for abandoned carts and sends reminder emails",
+        )
+
+        # Create EventBridge Rule to trigger cleanup every 10 minutes
+        cleanup_rule = events.Rule(
+            self,
+            "CleanupAbandonedCartsSchedule",
+            schedule=events.Schedule.rate(Duration.minutes(10)),
+            description="Triggers abandoned cart cleanup every 10 minutes",
+        )
+
+        # Add Lambda as target of the rule
+        cleanup_rule.add_target(targets.LambdaFunction(self.cleanup_abandoned_carts_fn))
+
         # ===== Grant Permissions =====
 
         # API Functions need read/write access to tables
@@ -279,6 +435,24 @@ class LambdaStack(Stack):
             idempotency_table.grant_read_write_data(fn)
             if event_bus:
                 event_bus.grant_put_events_to(fn)
+
+        # ===== Admin Lambda Permissions =====
+
+        # Admin list orders - needs read access to orders
+        orders_table.grant_read_data(self.admin_list_orders_fn)
+
+        # Admin cancel order - needs read/write to orders and inventory
+        orders_table.grant_read_write_data(self.admin_cancel_order_fn)
+        inventory_table.grant_read_write_data(self.admin_cancel_order_fn)
+
+        # Admin update inventory - needs read/write to inventory and products
+        inventory_table.grant_read_write_data(self.admin_update_inventory_fn)
+        products_table.grant_read_data(self.admin_update_inventory_fn)
+
+        # Admin analytics - needs read access to all tables
+        orders_table.grant_read_data(self.admin_analytics_fn)
+        products_table.grant_read_data(self.admin_analytics_fn)
+        inventory_table.grant_read_data(self.admin_analytics_fn)
 
         # ===== Step Functions Task Lambda Permissions =====
 
@@ -315,7 +489,7 @@ class LambdaStack(Stack):
         # Grant compensation handler access to DynamoDB
         orders_table.grant_read_write_data(self.compensation_handler_fn)
         inventory_table.grant_read_write_data(self.compensation_handler_fn)
-        
+
         # Grant access to Stripe secret for refunds
         self.compensation_handler_fn.add_to_role_policy(
             iam.PolicyStatement(
@@ -326,6 +500,18 @@ class LambdaStack(Stack):
             )
         )
 
+        # Grant cleanup abandoned carts function access to DynamoDB
+        orders_table.grant_read_write_data(self.cleanup_abandoned_carts_fn)
+        inventory_table.grant_read_write_data(self.cleanup_abandoned_carts_fn)
+
+        # Grant cleanup function permission to send emails via SES
+        self.cleanup_abandoned_carts_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["ses:SendEmail", "ses:SendRawEmail"],
+                resources=["*"],  # TODO: In production, scope this down to specific email addresses
+            )
+        )
+
         # Store references for other stacks
         self.api_functions = {
             "create_order": self.create_order_fn,
@@ -333,6 +519,12 @@ class LambdaStack(Stack):
             "list_products": self.list_products_fn,
             "check_inventory": self.check_inventory_fn,
             "stripe_webhook": self.stripe_webhook_fn,
+            "admin_auth": self.admin_auth_fn,
+            "admin_authorizer": self.admin_authorizer_fn,
+            "admin_list_orders": self.admin_list_orders_fn,
+            "admin_cancel_order": self.admin_cancel_order_fn,
+            "admin_update_inventory": self.admin_update_inventory_fn,
+            "admin_analytics": self.admin_analytics_fn,
         }
         
         # ===== Export Lambda ARNs for Step Functions Stack =====
@@ -378,3 +570,43 @@ class LambdaStack(Stack):
             export_name="CompensationHandlerFunctionArn",
             description="Compensation Handler Lambda ARN for Step Functions",
         )
+
+        # ===== Enable X-Ray Tracing on all Lambda functions =====
+        self._enable_xray_tracing()
+
+    def _enable_xray_tracing(self):
+        """
+        Enable AWS X-Ray active tracing on all Lambda functions.
+        This provides distributed tracing for the entire order fulfillment flow.
+        """
+        lambda_functions = [
+            self.create_order_fn,
+            self.get_order_fn,
+            self.list_products_fn,
+            self.check_inventory_fn,
+            self.stripe_webhook_fn,
+            self.admin_auth_fn,
+            self.admin_authorizer_fn,
+            self.admin_list_orders_fn,
+            self.admin_cancel_order_fn,
+            self.admin_update_inventory_fn,
+            self.admin_analytics_fn,
+            self.reserve_inventory_fn,
+            self.process_payment_fn,
+            self.allocate_shipping_fn,
+            self.send_notification_fn,
+            self.compensation_handler_fn,
+            self.cleanup_abandoned_carts_fn,
+        ]
+
+        for func in lambda_functions:
+            # Add X-Ray SDK to the function's execution role
+            func.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=[
+                        "xray:PutTraceSegments",
+                        "xray:PutTelemetryRecords",
+                    ],
+                    resources=["*"],
+                )
+            )

@@ -143,7 +143,7 @@ describe('OrderRepository', () => {
         customerId: 'customer-456',
         items: [],
         totalAmount: 1000,
-        status: OrderStatus.SHIPPED,
+        status: OrderStatus.SHIPPING_ALLOCATED,
         shippingAddress: {
           street: '123 Main St',
           city: 'Test City',
@@ -159,9 +159,9 @@ describe('OrderRepository', () => {
         Attributes: updatedOrder,
       });
 
-      const result = await repository.updateStatus('order-123', OrderStatus.SHIPPED);
+      const result = await repository.updateStatus('order-123', OrderStatus.SHIPPING_ALLOCATED);
 
-      expect(result.status).toBe(OrderStatus.SHIPPED);
+      expect(result.status).toBe(OrderStatus.SHIPPING_ALLOCATED);
       expect(dynamoClient.send).toHaveBeenCalledTimes(1);
     });
 
@@ -171,7 +171,7 @@ describe('OrderRepository', () => {
       (dynamoClient.send as jest.Mock).mockRejectedValue(error);
 
       await expect(
-        repository.updateStatus('non-existent', OrderStatus.SHIPPED)
+        repository.updateStatus('non-existent', OrderStatus.SHIPPING_ALLOCATED)
       ).rejects.toThrow();
     });
   });
@@ -184,7 +184,7 @@ describe('OrderRepository', () => {
         customerId: 'customer-456',
         items: [],
         totalAmount: 1000,
-        status: OrderStatus.SHIPPED,
+        status: OrderStatus.SHIPPING_ALLOCATED,
         trackingNumber: 'TRACK-123',
         shippingAddress: {
           street: '123 Main St',
@@ -203,11 +203,11 @@ describe('OrderRepository', () => {
 
       const result = await repository.update('order-123', {
         trackingNumber: 'TRACK-123',
-        status: OrderStatus.SHIPPED,
+        status: OrderStatus.SHIPPING_ALLOCATED,
       });
 
       expect(result.trackingNumber).toBe('TRACK-123');
-      expect(result.status).toBe(OrderStatus.SHIPPED);
+      expect(result.status).toBe(OrderStatus.SHIPPING_ALLOCATED);
     });
   });
 
@@ -220,7 +220,7 @@ describe('OrderRepository', () => {
           customerId: 'customer-456',
           items: [],
           totalAmount: 1000,
-          status: OrderStatus.DELIVERED,
+          status: OrderStatus.PAYMENT_CONFIRMED,
           shippingAddress: {} as any,
           createdAt: '2024-01-01T00:00:00Z',
           updatedAt: '2024-01-01T00:00:00Z',
@@ -231,7 +231,7 @@ describe('OrderRepository', () => {
           customerId: 'customer-456',
           items: [],
           totalAmount: 2000,
-          status: OrderStatus.SHIPPED,
+          status: OrderStatus.SHIPPING_ALLOCATED,
           shippingAddress: {} as any,
           createdAt: '2024-01-02T00:00:00Z',
           updatedAt: '2024-01-02T00:00:00Z',
@@ -258,7 +258,7 @@ describe('OrderRepository', () => {
           customerId: 'customer-456',
           items: [],
           totalAmount: 1000,
-          status: OrderStatus.DELIVERED,
+          status: OrderStatus.PAYMENT_CONFIRMED,
           shippingAddress: {} as any,
           createdAt: '2024-01-01T00:00:00Z',
           updatedAt: '2024-01-01T00:00:00Z',

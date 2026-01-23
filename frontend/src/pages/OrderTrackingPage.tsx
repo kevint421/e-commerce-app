@@ -20,7 +20,7 @@ export function OrderTrackingPage() {
     enabled: !!searchOrderId,
     refetchInterval: (query) => {
       // Stop polling if order is in final state
-      const finalStates = ['SHIPPING_ALLOCATED', 'DELIVERED', 'CANCELLED'];
+      const finalStates = ['SHIPPING_ALLOCATED', 'CANCELLED'];
       const orderData = query.state.data;
       return orderData && finalStates.includes(orderData.status) ? false : 5000;
     },
@@ -37,7 +37,6 @@ export function OrderTrackingPage() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'SHIPPING_ALLOCATED':
-      case 'DELIVERED':
         return <CheckCircle className="h-8 w-8 text-green-600" />;
       case 'CANCELLED':
         return <XCircle className="h-8 w-8 text-red-600" />;
@@ -54,7 +53,7 @@ export function OrderTrackingPage() {
       { status: 'SHIPPING_ALLOCATED', label: 'Shipped' },
     ];
 
-    const statusOrder = ['PENDING', 'INVENTORY_RESERVED', 'PAYMENT_CONFIRMED', 'SHIPPING_ALLOCATED', 'DELIVERED'];
+    const statusOrder = ['PENDING', 'INVENTORY_RESERVED', 'PAYMENT_CONFIRMED', 'SHIPPING_ALLOCATED'];
     const currentIndex = statusOrder.indexOf(currentStatus);
 
     return steps.map((step, index) => ({

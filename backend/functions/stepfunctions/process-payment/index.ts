@@ -5,7 +5,7 @@ import {
   OrderStatus,
   logger,
   getCurrentTimestamp,
-  createAndConfirmPayment,
+  getPaymentIntent,
 } from 'ecommerce-backend-shared';
 
 const orderRepo = new OrderRepository();
@@ -30,7 +30,8 @@ interface ProcessPaymentOutput {
 
 /**
  * Process Payment Step Function Task
- * Processes payment with idempotency to prevent double-charging
+ * Verifies that payment has already been confirmed by the user on the frontend
+ * (Payment was already processed via Stripe Elements and webhook confirmation)
  */
 export const handler: Handler<ProcessPaymentInput, ProcessPaymentOutput> = async (
   event
@@ -38,7 +39,7 @@ export const handler: Handler<ProcessPaymentInput, ProcessPaymentOutput> = async
   const { orderId } = event;
 
   logger.setContext({ orderId });
-  logger.info('Processing payment for order');
+  logger.info('Verifying payment for order');
 
   // Get order
   const order = await orderRepo.getById(orderId);
@@ -52,66 +53,74 @@ export const handler: Handler<ProcessPaymentInput, ProcessPaymentOutput> = async
     throw new Error(`Order must be in INVENTORY_RESERVED status, currently: ${order.status}`);
   }
 
-  // Process payment with idempotency
+  // Verify payment with idempotency
   const paymentResult = await idempotency.executeOnce(
-    IdempotencyService.generateOrderKey(orderId, 'payment'),
-    'process-payment',
+    IdempotencyService.generateOrderKey(orderId, 'payment-verification'),
+    'verify-payment',
     async () => {
-      logger.info('Initiating payment with Stripe', {
-        amount: order.totalAmount,
-        customerId: order.customerId,
+      logger.info('Verifying payment with Stripe', {
+        paymentIntentId: order.paymentIntentId,
+        orderId,
       });
 
-      try {
-        // Create and confirm payment with Stripe (synchronous flow)
-        const paymentIntent = await createAndConfirmPayment(
-          order.totalAmount,
-          'usd',
-          {
-            orderId: order.orderId,
-            customerId: order.customerId,
-          }
-        );
+      // Check that order has a paymentIntentId
+      if (!order.paymentIntentId) {
+        throw new Error('Order missing paymentIntentId - payment was not initiated');
+      }
 
-        // Check payment status
+      try {
+        // Retrieve the existing PaymentIntent from Stripe to verify its status
+        const paymentIntent = await getPaymentIntent(order.paymentIntentId);
+
+        // Verify payment succeeded
         if (paymentIntent.status !== 'succeeded') {
           throw new Error(
-            `Payment failed with status: ${paymentIntent.status}`
+            `Payment verification failed: Expected status 'succeeded' but got '${paymentIntent.status}'`
           );
         }
 
-        logger.info('Payment processed successfully with Stripe', {
+        // Verify the amount matches
+        if (paymentIntent.amount !== order.totalAmount) {
+          logger.warn('Payment amount mismatch', {
+            expected: order.totalAmount,
+            actual: paymentIntent.amount,
+          });
+          throw new Error(
+            `Payment amount mismatch: Expected ${order.totalAmount}, got ${paymentIntent.amount}`
+          );
+        }
+
+        logger.info('Payment verified successfully', {
           paymentIntentId: paymentIntent.id,
-          amount: order.totalAmount,
+          amount: paymentIntent.amount,
           status: paymentIntent.status,
         });
 
         return {
           paymentId: paymentIntent.id,
-          amount: order.totalAmount,
+          amount: paymentIntent.amount,
           status: 'succeeded',
           paymentMethod: paymentIntent.payment_method as string,
         };
       } catch (error: any) {
-        logger.error('Payment processing failed', error, {
+        logger.error('Payment verification failed', error, {
           orderId,
-          amount: order.totalAmount,
+          paymentIntentId: order.paymentIntentId,
         });
-        
+
         // Throw error to trigger compensation
-        throw new Error(`Payment failed: ${error.message}`);
-      
+        throw new Error(`Payment verification failed: ${error.message}`);
       }
     }
   );
 
-  // Update order status
+  // Update order status to PAYMENT_CONFIRMED
   await orderRepo.update(orderId, {
     status: OrderStatus.PAYMENT_CONFIRMED,
     updatedAt: getCurrentTimestamp(),
   });
 
-  logger.info('Payment processing completed', {
+  logger.info('Payment verification completed', {
     orderId,
     paymentId: paymentResult.paymentId,
   });

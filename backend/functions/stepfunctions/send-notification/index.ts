@@ -2,6 +2,8 @@ import { Handler } from 'aws-lambda';
 import {
   OrderRepository,
   logger,
+  sendOrderConfirmationEmail,
+  OrderConfirmationData,
 } from 'ecommerce-backend-shared';
 
 const orderRepo = new OrderRepository();
@@ -21,7 +23,7 @@ interface SendNotificationOutput {
 
 /**
  * Send Notification Step Function Task
- * Sends order confirmation email to customer
+ * Sends order confirmation email to customer via Amazon SES
  */
 export const handler: Handler<SendNotificationInput, SendNotificationOutput> = async (
   event
@@ -29,7 +31,10 @@ export const handler: Handler<SendNotificationInput, SendNotificationOutput> = a
   const { orderId, trackingNumber, carrier, estimatedDelivery } = event;
 
   logger.setContext({ orderId });
-  logger.info('Sending order confirmation notification');
+  logger.info('Sending order confirmation notification', {
+    trackingNumber,
+    carrier,
+  });
 
   // Get order
   const order = await orderRepo.getById(orderId);
@@ -37,55 +42,54 @@ export const handler: Handler<SendNotificationInput, SendNotificationOutput> = a
     throw new Error(`Order not found: ${orderId}`);
   }
 
-  // Build email content
-  const emailContent = {
-    to: `customer-${order.customerId}@example.com`,
-    subject: `Order Confirmation - ${orderId}`,
-    body: `
-      Your order has been confirmed!
-      
-      Order ID: ${orderId}
-      Total: $${(order.totalAmount / 100).toFixed(2)}
-      Items: ${order.items.length}
-      
-      Tracking Number: ${trackingNumber}
-      Carrier: ${carrier}
-      Estimated Delivery: ${estimatedDelivery}
-      
-      Shipping Address:
-      ${order.shippingAddress.street}
-      ${order.shippingAddress.city}, ${order.shippingAddress.state} ${order.shippingAddress.postalCode}
-      
-      Thank you for your order!
-    `,
+  // Extract customer email from customerId or use configured test email
+  // In production, you would fetch the actual customer email from a Users table
+  const customerEmail = process.env.TEST_CUSTOMER_EMAIL || `${order.customerId}@example.com`;
+
+  // Prepare email data
+  const emailData: OrderConfirmationData = {
+    orderId: order.orderId,
+    customerEmail,
+    items: order.items.map((item) => ({
+      productName: item.productName,
+      quantity: item.quantity,
+      pricePerUnit: item.pricePerUnit,
+      totalPrice: item.totalPrice,
+    })),
+    totalAmount: order.totalAmount,
+    shippingAddress: order.shippingAddress,
+    trackingNumber,
+    carrier,
+    estimatedDelivery,
   };
 
-  logger.info('Email content prepared', {
-    to: emailContent.to,
-    subject: emailContent.subject,
-  });
+  try {
+    // Send email via Amazon SES
+    await sendOrderConfirmationEmail(emailData);
 
-  // TODO: In production, send real email via SES
-  // await ses.sendEmail({
-  //   Source: process.env.SES_FROM_EMAIL,
-  //   Destination: { ToAddresses: [emailContent.to] },
-  //   Message: {
-  //     Subject: { Data: emailContent.subject },
-  //     Body: { Text: { Data: emailContent.body } },
-  //   },
-  // });
+    logger.info('Order confirmation email sent successfully', {
+      orderId,
+      customerEmail,
+    });
 
-  // Mock email sending
-  await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      orderId,
+      notificationSent: true,
+      emailSent: true,
+    };
+  } catch (error: any) {
+    logger.error('Failed to send order confirmation email', error, {
+      orderId,
+      customerEmail,
+      errorCode: error.code,
+    });
 
-  logger.info('Notification sent successfully', {
-    orderId,
-    recipient: emailContent.to,
-  });
-
-  return {
-    orderId,
-    notificationSent: true,
-    emailSent: true,
-  };
+    // Don't fail the saga if email fails - just log and continue
+    // In production, you might want to retry or send to a DLQ
+    return {
+      orderId,
+      notificationSent: false,
+      emailSent: false,
+    };
+  }
 };

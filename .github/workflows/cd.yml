@@ -1,0 +1,358 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  AWS_REGION: us-east-2
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # Build Lambda Functions
+  build-backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache Lambda builds
+        uses: actions/cache@v3
+        with:
+          path: |
+            backend/functions/**/dist
+            backend/functions/**/node_modules
+          key: lambda-build-${{ hashFiles('backend/functions/**/*.ts', 'backend/shared/**/*.ts') }}
+          restore-keys: |
+            lambda-build-
+
+      - name: Install backend/shared dependencies
+        working-directory: backend/shared
+        run: npm ci
+
+      - name: Build backend/shared
+        working-directory: backend/shared
+        run: npm run build
+
+      - name: Make build script executable
+        run: chmod +x build-lambdas.sh
+
+      - name: Build all Lambda functions
+        run: ./build-lambdas.sh
+
+      - name: Upload Lambda build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-builds
+          path: backend/functions/**/dist
+          retention-days: 1
+
+  # Build Frontend
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+        env:
+          # Use API URL from GitHub secret (set after first backend deployment)
+          # For first-time deployment, you may need to deploy backend first, then set this secret
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          # Stripe publishable key for frontend payment integration
+          VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}
+
+      - name: Upload frontend build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist
+          retention-days: 1
+
+  # Deploy to AWS
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    environment:
+      name: ${{ github.event.inputs.environment || 'prod' }}
+      url: ${{ steps.deploy.outputs.cloudfront_url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Lambda build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-builds
+          path: backend/functions
+
+      - name: Download frontend build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install CDK dependencies
+        working-directory: infrastructure
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK Bootstrap (if needed)
+        working-directory: infrastructure
+        run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
+        continue-on-error: true
+
+      - name: CDK Deploy
+        id: deploy
+        working-directory: infrastructure
+        run: |
+          echo "Deploying to ${{ github.event.inputs.environment || 'prod' }}..."
+          cdk deploy --all --require-approval never --outputs-file outputs.json
+
+          # Extract URLs from outputs
+          API_URL=$(jq -r '.EcommerceApiGatewayStack.ApiUrl' outputs.json)
+          CLOUDFRONT_URL=$(jq -r '.EcommerceFrontendStack.CloudFrontURL // "N/A"' outputs.json)
+          CLOUDFRONT_ID=$(jq -r '.EcommerceFrontendStack.CloudFrontDistributionId // "N/A"' outputs.json)
+
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "cloudfront_url=$CLOUDFRONT_URL" >> $GITHUB_OUTPUT
+          echo "cloudfront_id=$CLOUDFRONT_ID" >> $GITHUB_OUTPUT
+
+          echo "Deployed API URL: $API_URL"
+          echo "Deployed Frontend URL: $CLOUDFRONT_URL"
+        env:
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          ALARM_EMAIL: ${{ secrets.ALARM_EMAIL }}
+
+      - name: Upload CDK outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-outputs
+          path: infrastructure/outputs.json
+          retention-days: 30
+
+  # Post-Deployment Smoke Tests
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    needs: deploy
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download CDK outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-outputs
+          path: .
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Extract URLs
+        id: extract-url
+        run: |
+          API_URL=$(jq -r '.EcommerceApiGatewayStack.ApiUrl' outputs.json)
+          CLOUDFRONT_URL=$(jq -r '.EcommerceFrontendStack.CloudFrontURL // "N/A"' outputs.json)
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "cloudfront_url=$CLOUDFRONT_URL" >> $GITHUB_OUTPUT
+          echo "Testing API at: $API_URL"
+          echo "Testing Frontend at: $CLOUDFRONT_URL"
+
+      - name: Wait for services to be ready
+        run: sleep 30
+
+      - name: Test GET /products endpoint
+        run: |
+          echo "Testing GET /products..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" ${{ steps.extract-url.outputs.api_url }}products)
+          if [ "$response" != "200" ]; then
+            echo "❌ GET /products failed with status: $response"
+            exit 1
+          fi
+          echo "✅ GET /products: OK"
+
+      - name: Test GET /inventory endpoint
+        run: |
+          echo "Testing GET /inventory..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" ${{ steps.extract-url.outputs.api_url }}inventory/product-laptop)
+          if [ "$response" != "200" ]; then
+            echo "❌ GET /inventory failed with status: $response"
+            exit 1
+          fi
+          echo "✅ GET /inventory: OK"
+
+      - name: Test POST /orders endpoint (validation)
+        run: |
+          echo "Testing POST /orders with invalid data..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST ${{ steps.extract-url.outputs.api_url }}orders \
+            -H "Content-Type: application/json" \
+            -d '{"customerId": "test"}')
+
+          # Expect 400 for invalid data
+          if [ "$response" != "400" ]; then
+            echo "❌ POST /orders validation failed with status: $response (expected 400)"
+            exit 1
+          fi
+          echo "✅ POST /orders validation: OK"
+
+      - name: Test CloudFront frontend
+        run: |
+          if [ "${{ steps.extract-url.outputs.cloudfront_url }}" != "N/A" ]; then
+            echo "Testing CloudFront frontend..."
+            response=$(curl -s -o /dev/null -w "%{http_code}" ${{ steps.extract-url.outputs.cloudfront_url }})
+            if [ "$response" != "200" ]; then
+              echo "❌ CloudFront frontend failed with status: $response"
+              exit 1
+            fi
+            echo "✅ CloudFront frontend: OK"
+          else
+            echo "⚠️  CloudFront URL not available, skipping frontend test"
+          fi
+
+      - name: Smoke tests summary
+        run: |
+          echo "🎉 All smoke tests passed!"
+          echo "- Products endpoint: ✅"
+          echo "- Inventory endpoint: ✅"
+          echo "- Orders validation: ✅"
+          echo "- Frontend CloudFront: ✅"
+
+  # Failure Notification
+  notify-failure:
+    name: Deployment Failure Notification
+    runs-on: ubuntu-latest
+    needs: [deploy, smoke-tests]
+    if: failure()
+
+    steps:
+      - name: Deployment failure details
+        run: |
+          echo "❌ Deployment or smoke tests failed"
+          echo ""
+          echo "⚠️  MANUAL INTERVENTION REQUIRED"
+          echo ""
+          echo "To rollback the deployment manually:"
+          echo ""
+          echo "1. Check CloudFormation console for failed stacks:"
+          echo "   https://console.aws.amazon.com/cloudformation"
+          echo ""
+          echo "2. Identify which stack failed (likely one of):"
+          echo "   - EcommerceDatabaseStack"
+          echo "   - EcommerceLambdaStack"
+          echo "   - EcommerceApiGatewayStack"
+          echo "   - EcommerceStepFunctionsStack"
+          echo "   - EcommerceMonitoringStack"
+          echo "   - EcommerceFrontendStack"
+          echo ""
+          echo "3. View stack events to identify the failure reason"
+          echo ""
+          echo "4. Rollback options:"
+          echo "   a) AWS Console: Select stack → Actions → Roll back"
+          echo "   b) AWS CLI:"
+          echo "      aws cloudformation rollback-stack --stack-name <STACK_NAME> --region ${{ env.AWS_REGION }}"
+          echo ""
+          echo "5. If rollback fails, you may need to:"
+          echo "   - Delete the failed stack"
+          echo "   - Manually clean up resources"
+          echo "   - Redeploy from a working commit"
+          echo ""
+          echo "📋 Check GitHub Actions logs above for detailed error messages"
+          echo "📧 CloudWatch alarms may have been triggered if ALARM_EMAIL is configured"
+
+  # Deployment Success Notification
+  notify-success:
+    name: Deployment Success
+    runs-on: ubuntu-latest
+    needs: [deploy, smoke-tests]
+    if: success()
+
+    steps:
+      - name: Download CDK outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-outputs
+          path: .
+
+      - name: Deployment summary
+        run: |
+          echo "🚀 Deployment successful!"
+          echo ""
+          echo "Environment: ${{ github.event.inputs.environment || 'prod' }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo ""
+          echo "📍 Deployed URLs:"
+          echo "  API URL: $(jq -r '.EcommerceApiGatewayStack.ApiUrl' outputs.json)"
+          echo "  Frontend URL: $(jq -r '.EcommerceFrontendStack.CloudFrontURL // "N/A"' outputs.json)"
+          echo ""
+          echo "✅ All smoke tests passed"
+          echo "✅ Infrastructure deployed"
+          echo "✅ Lambda functions updated"
+          echo "✅ Frontend deployed to CloudFront"

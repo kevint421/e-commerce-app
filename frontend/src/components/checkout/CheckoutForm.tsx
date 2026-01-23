@@ -204,7 +204,9 @@ function PaymentForm({
       }
 
       if (paymentIntent && paymentIntent.status === 'succeeded') {
-        toast.success('Payment successful!');
+        toast.success(`Payment successful! Order ID: ${orderId}`, {
+          duration: 4000, // 4 seconds (2 seconds more than default)
+        });
         clearCart();
         navigate(`/order-confirmation?orderId=${orderId}`);
       }
@@ -229,9 +231,13 @@ function PaymentForm({
         </div>
 
         <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-4">
-          <p className="text-sm text-blue-800">
+          <p className="text-sm text-blue-800 mb-2">
             💳 <strong>Test Mode:</strong> Use card <code className="bg-blue-100 px-1 rounded">4242 4242 4242 4242</code>
             {' '}with any future date and CVC.
+          </p>
+          <p className="text-sm text-blue-800">
+            <strong>Test declined:</strong> <code className="bg-blue-100 px-1 rounded">4000 0000 0000 9995</code>
+            {' '}(Insufficient funds)
           </p>
         </div>
       </div>

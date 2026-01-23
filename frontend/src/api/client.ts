@@ -10,6 +10,40 @@ export const apiClient = axios.create({
   },
 });
 
+// Add request interceptor to include admin token in Authorization header
+apiClient.interceptors.request.use(
+  (config) => {
+    // Add Authorization header for admin endpoints
+    if (config.url?.startsWith('/admin') && config.url !== '/admin/auth') {
+      const token = localStorage.getItem('admin_token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Add response interceptor to handle unauthorized responses
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // If 401 Unauthorized on admin endpoint, clear session and redirect to login
+    if (error.response?.status === 401 && error.config?.url?.startsWith('/admin')) {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_username');
+      // Redirect to login page
+      if (window.location.pathname.startsWith('/admin')) {
+        window.location.href = '/admin/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Products API
 export const productsApi = {
   getAll: async (): Promise<Product[]> => {

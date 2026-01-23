@@ -63,6 +63,14 @@ export {
   createRefund,
   getPaymentIntent,
 } from './services/stripe-service';
+export {
+  sendOrderConfirmationEmail,
+  sendShippingNotificationEmail,
+  sendAbandonedCartReminderEmail,
+  OrderConfirmationData,
+  ShippingNotificationData,
+  AbandonedCartReminderData,
+} from './services/email-service';
 
 /**
  * Usage Example:

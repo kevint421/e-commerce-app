@@ -36,15 +36,17 @@ async function getWebhookSecret(): Promise<string | null> {
     );
 
     cachedWebhookSecret = response.SecretString || null;
-    
+
     if (cachedWebhookSecret) {
       logger.info('Webhook secret loaded from Secrets Manager');
+    } else {
+      logger.error('Webhook secret is empty in Secrets Manager');
     }
-    
+
     return cachedWebhookSecret;
   } catch (error: any) {
-    // If secret doesn't exist, log warning but continue (for dev/testing)
-    logger.warn('Webhook secret not found in Secrets Manager - signature verification disabled', {
+    // Secret retrieval failed - this is a critical error for webhook security
+    logger.error('Failed to retrieve webhook secret from Secrets Manager', {
       error: error.message,
     });
     return null;
@@ -73,34 +75,39 @@ export const handler = async (
   try {
     // Get webhook secret from Secrets Manager
     const webhookSecret = await getWebhookSecret();
-    
+
     // Verify webhook signature
     const stripe = await getStripeClient();
     const signature = event.headers['Stripe-Signature'] || event.headers['stripe-signature'];
-    
+
     if (!event.body) {
       return errorResponse(400, 'Request body is required');
     }
 
+    // Webhook secret is required for security - reject if not available
+    if (!webhookSecret) {
+      logger.error('Webhook secret not configured - cannot verify webhook signature');
+      return errorResponse(500, 'Webhook signature verification failed: Secret not configured');
+    }
+
+    if (!signature) {
+      logger.error('Webhook signature missing from request');
+      return errorResponse(400, 'Webhook signature missing');
+    }
+
     let stripeEvent: Stripe.Event;
 
-    if (webhookSecret && signature) {
-      try {
-        // Verify the webhook signature
-        stripeEvent = stripe.webhooks.constructEvent(
-          event.body,
-          signature,
-          webhookSecret
-        );
-        logger.info('Webhook signature verified');
-      } catch (err: any) {
-        logger.error('Webhook signature verification failed', err);
-        return errorResponse(400, `Webhook signature verification failed: ${err.message}`);
-      }
-    } else {
-      // No webhook secret configured - parse event directly (dev mode)
-      logger.warn('Webhook signature verification skipped - no secret configured');
-      stripeEvent = JSON.parse(event.body) as Stripe.Event;
+    try {
+      // Verify the webhook signature
+      stripeEvent = stripe.webhooks.constructEvent(
+        event.body,
+        signature,
+        webhookSecret
+      );
+      logger.info('Webhook signature verified');
+    } catch (err: any) {
+      logger.error('Webhook signature verification failed', err);
+      return errorResponse(400, `Webhook signature verification failed: ${err.message}`);
     }
 
     logger.info('Processing Stripe event', {
@@ -159,6 +166,7 @@ async function handlePaymentSucceeded(event: Stripe.Event) {
     }
 
     // 2. Idempotency check - skip if order already processed
+    // Orders start in PENDING status (inventory not yet reserved)
     if (existingOrder.status !== 'PENDING') {
       logger.warn('Order already processed - skipping duplicate webhook', {
         orderId,

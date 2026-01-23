@@ -88,8 +88,9 @@ describe('InventoryRepository', () => {
 
   describe('reserve', () => {
     it('should reserve inventory with optimistic locking', async () => {
+      // New logic: quantity stays same (100), only reserved increases (10 -> 12)
       const updatedInventory = createMockInventory({
-        quantity: 98,
+        quantity: 100,
         reserved: 12,
         version: 2,
       });
@@ -103,7 +104,7 @@ describe('InventoryRepository', () => {
 
       const result = await repository.reserve('prod-123', 'warehouse-1', 2, 1);
 
-      expect(result.quantity).toBe(98);
+      expect(result.quantity).toBe(100);
       expect(result.reserved).toBe(12);
       expect(result.version).toBe(2);
     });
@@ -131,8 +132,9 @@ describe('InventoryRepository', () => {
 
   describe('release', () => {
     it('should release reserved inventory', async () => {
+      // New logic: quantity stays same (100), only reserved decreases (10 -> 8)
       const updatedInventory = createMockInventory({
-        quantity: 102,
+        quantity: 100,
         reserved: 8,
         version: 2,
       });
@@ -146,7 +148,7 @@ describe('InventoryRepository', () => {
 
       const result = await repository.release('prod-123', 'warehouse-1', 2, 1);
 
-      expect(result.quantity).toBe(102);
+      expect(result.quantity).toBe(100);
       expect(result.reserved).toBe(8);
       expect(result.version).toBe(2);
     });
@@ -227,11 +229,16 @@ describe('InventoryRepository', () => {
   });
 
   describe('getTotalAvailableQuantity', () => {
-    it('should sum quantity across all warehouses', async () => {
+    it('should sum available quantity (quantity - reserved) across all warehouses', async () => {
+      // New logic: calculates (quantity - reserved) for each warehouse
+      // warehouse-1: 100 - 10 = 90
+      // warehouse-2: 50 - 5 = 45
+      // warehouse-3: 25 - 5 = 20
+      // Total: 90 + 45 + 20 = 155
       const inventoryList = [
-        createMockInventory({ warehouseId: 'warehouse-1', quantity: 100 }),
-        createMockInventory({ warehouseId: 'warehouse-2', quantity: 50 }),
-        createMockInventory({ warehouseId: 'warehouse-3', quantity: 25 }),
+        createMockInventory({ warehouseId: 'warehouse-1', quantity: 100, reserved: 10 }),
+        createMockInventory({ warehouseId: 'warehouse-2', quantity: 50, reserved: 5 }),
+        createMockInventory({ warehouseId: 'warehouse-3', quantity: 25, reserved: 5 }),
       ];
 
       (dynamoClient.send as jest.Mock).mockResolvedValue(
@@ -242,16 +249,20 @@ describe('InventoryRepository', () => {
 
       const total = await repository.getTotalAvailableQuantity('prod-123');
 
-      expect(total).toBe(175);
+      expect(total).toBe(155);
     });
   });
 
   describe('findWarehouseWithStock', () => {
-    it('should find warehouse with sufficient stock', async () => {
+    it('should find warehouse with sufficient available stock (quantity - reserved)', async () => {
+      // New logic: checks (quantity - reserved) >= required
+      // warehouse-1: 30 - 25 = 5 (insufficient)
+      // warehouse-2: 50 - 20 = 30 (sufficient for 20)
+      // warehouse-3: 100 - 90 = 10 (insufficient)
       const inventoryList = [
-        createMockInventory({ warehouseId: 'warehouse-1', quantity: 10 }),
-        createMockInventory({ warehouseId: 'warehouse-2', quantity: 50 }),
-        createMockInventory({ warehouseId: 'warehouse-3', quantity: 100 }),
+        createMockInventory({ warehouseId: 'warehouse-1', quantity: 30, reserved: 25 }),
+        createMockInventory({ warehouseId: 'warehouse-2', quantity: 50, reserved: 20 }),
+        createMockInventory({ warehouseId: 'warehouse-3', quantity: 100, reserved: 90 }),
       ];
 
       (dynamoClient.send as jest.Mock).mockResolvedValue(
@@ -264,13 +275,18 @@ describe('InventoryRepository', () => {
 
       expect(result).not.toBeNull();
       expect(result?.warehouseId).toBe('warehouse-2');
-      expect(result?.quantity).toBeGreaterThanOrEqual(20);
+      if (result) {
+        expect(result.quantity - result.reserved).toBeGreaterThanOrEqual(20);
+      }
     });
 
-    it('should return null when no warehouse has sufficient stock', async () => {
+    it('should return null when no warehouse has sufficient available stock', async () => {
+      // All warehouses have insufficient available stock
+      // warehouse-1: 10 - 8 = 2
+      // warehouse-2: 15 - 10 = 5
       const inventoryList = [
-        createMockInventory({ warehouseId: 'warehouse-1', quantity: 5 }),
-        createMockInventory({ warehouseId: 'warehouse-2', quantity: 8 }),
+        createMockInventory({ warehouseId: 'warehouse-1', quantity: 10, reserved: 8 }),
+        createMockInventory({ warehouseId: 'warehouse-2', quantity: 15, reserved: 10 }),
       ];
 
       (dynamoClient.send as jest.Mock).mockResolvedValue(
@@ -286,10 +302,13 @@ describe('InventoryRepository', () => {
   });
 
   describe('hasStock', () => {
-    it('should return true when sufficient stock exists', async () => {
+    it('should return true when sufficient available stock exists', async () => {
+      // warehouse-1: 100 - 10 = 90
+      // warehouse-2: 50 - 20 = 30
+      // Total available: 90 + 30 = 120 (sufficient for 100)
       const inventoryList = [
-        createMockInventory({ quantity: 100 }),
-        createMockInventory({ quantity: 50 }),
+        createMockInventory({ quantity: 100, reserved: 10 }),
+        createMockInventory({ quantity: 50, reserved: 20 }),
       ];
 
       (dynamoClient.send as jest.Mock).mockResolvedValue(
@@ -303,10 +322,13 @@ describe('InventoryRepository', () => {
       expect(result).toBe(true);
     });
 
-    it('should return false when insufficient stock exists', async () => {
+    it('should return false when insufficient available stock exists', async () => {
+      // warehouse-1: 30 - 25 = 5
+      // warehouse-2: 40 - 35 = 5
+      // Total available: 5 + 5 = 10 (insufficient for 100)
       const inventoryList = [
-        createMockInventory({ quantity: 10 }),
-        createMockInventory({ quantity: 15 }),
+        createMockInventory({ quantity: 30, reserved: 25 }),
+        createMockInventory({ quantity: 40, reserved: 35 }),
       ];
 
       (dynamoClient.send as jest.Mock).mockResolvedValue(
