@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 import { apiClient } from '../api/client';
 
@@ -23,7 +23,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return localStorage.getItem('admin_username');
   });
 
-  const [isLoading, setIsLoading] = useState(false);
+  const isLoading = false;
 
   const login = async (username: string, password: string) => {
     try {

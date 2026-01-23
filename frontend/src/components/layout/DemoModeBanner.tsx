@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { AlertCircle, X } from 'lucide-react';
 
 export function DemoModeBanner() {
