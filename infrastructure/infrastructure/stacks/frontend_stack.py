@@ -63,20 +63,43 @@ class FrontendStack(Stack):
         self.website_bucket.grant_read(origin_access_identity)
 
         # ===== CloudFront Distribution =====
+        # Create S3 origin for CloudFront
+        s3_origin = origins.S3Origin(
+            self.website_bucket,
+            origin_access_identity=origin_access_identity,
+        )
+
         self.distribution = cloudfront.Distribution(
             self,
             "WebsiteDistribution",
             default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.S3Origin(
-                    self.website_bucket,
-                    origin_access_identity=origin_access_identity,
-                ),
+                origin=s3_origin,
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                 cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
                 cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
                 compress=True,  # Enable gzip/brotli compression
             ),
+            # Separate behavior for static assets (CSS, JS, images)
+            # No error responses for assets - let them 404 naturally
+            additional_behaviors={
+                "/assets/*": cloudfront.BehaviorOptions(
+                    origin=s3_origin,
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                    cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
+                    cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                    compress=True,
+                ),
+                "/vite.svg": cloudfront.BehaviorOptions(
+                    origin=s3_origin,
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                    cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
+                    cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                    compress=True,
+                ),
+            },
             default_root_object="index.html",
             # SPA routing: serve index.html for 404s (client-side routing)
             error_responses=[
