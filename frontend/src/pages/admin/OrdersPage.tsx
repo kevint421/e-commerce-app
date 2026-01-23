@@ -36,7 +36,7 @@ interface OrdersResponse {
   orders: Order[];
   pagination: {
     hasMore: boolean;
-    lastEvaluatedKey?: any;
+    lastEvaluatedKey?: string;
   };
 }
 
@@ -52,7 +52,7 @@ export function OrdersPage() {
         const params = statusFilter ? `?status=${statusFilter}` : '';
         const response = await apiClient.get(`/admin/orders${params}`);
         return response.data;
-      } catch (err: any) {
+      } catch (err) {
         toast.error('Failed to load orders');
         throw err;
       }
@@ -69,8 +69,9 @@ export function OrdersPage() {
       queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
       setSelectedOrder(null);
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to cancel order');
+    onError: (error) => {
+      const err = error as { response?: { data?: { message?: string } } };
+      toast.error(err.response?.data?.message || 'Failed to cancel order');
     },
   });
 

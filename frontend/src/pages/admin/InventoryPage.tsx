@@ -53,7 +53,7 @@ export function InventoryPage() {
       const response = await apiClient.get(`/inventory/${selectedProduct.productId}`);
       const warehouses = response.data.warehouses || [];
       // Transform warehouses array to InventoryItem format
-      return warehouses.map((w: any) => ({
+      return warehouses.map((w: { warehouseId: string; available: number; reserved: number }) => ({
         productId: selectedProduct.productId,
         warehouseId: w.warehouseId,
         quantity: w.available + w.reserved,
@@ -75,8 +75,9 @@ export function InventoryPage() {
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
       setUpdateForm({ warehouseId: 'warehouse-east', quantity: 0, operation: 'add' });
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to update inventory');
+    onError: (error) => {
+      const err = error as { response?: { data?: { message?: string } } };
+      toast.error(err.response?.data?.message || 'Failed to update inventory');
     },
   });
 
@@ -236,7 +237,7 @@ export function InventoryPage() {
                       </label>
                       <select
                         value={updateForm.operation}
-                        onChange={(e) => setUpdateForm({ ...updateForm, operation: e.target.value as any })}
+                        onChange={(e) => setUpdateForm({ ...updateForm, operation: e.target.value as 'set' | 'add' | 'subtract' })}
                         className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                       >
                         <option value="add">Add to Stock (Restock)</option>

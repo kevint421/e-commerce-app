@@ -2,14 +2,10 @@ import { useState, useEffect } from 'react';
 import { AlertCircle, X } from 'lucide-react';
 
 export function DemoModeBanner() {
-  const [isVisible, setIsVisible] = useState(true);
-
-  useEffect(() => {
+  const [isVisible, setIsVisible] = useState(() => {
     const dismissed = localStorage.getItem('demo-banner-dismissed');
-    if (dismissed === 'true') {
-      setIsVisible(false);
-    }
-  }, []);
+    return dismissed !== 'true';
+  });
 
   const handleDismiss = () => {
     localStorage.setItem('demo-banner-dismissed', 'true');

@@ -60,9 +60,10 @@ function ShippingAddressForm({
 
       toast.success('Order created! Please complete payment.');
       onOrderCreated(response.clientSecret, response.orderId);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Order creation error:', error);
-      toast.error(error.response?.data?.message || 'Failed to create order.');
+      const err = error as { response?: { data?: { message?: string } } };
+      toast.error(err.response?.data?.message || 'Failed to create order.');
     } finally {
       setIsProcessing(false);
     }
@@ -210,7 +211,7 @@ function PaymentForm({
         clearCart();
         navigate(`/order-confirmation?orderId=${orderId}`);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Payment error:', error);
       toast.error('Payment failed.');
       setIsProcessing(false);

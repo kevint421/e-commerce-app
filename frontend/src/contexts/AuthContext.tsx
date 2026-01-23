@@ -13,22 +13,17 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [username, setUsername] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    // Check if user is already logged in
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
     const token = localStorage.getItem('admin_token');
     const savedUsername = localStorage.getItem('admin_username');
+    return !!(token && savedUsername);
+  });
 
-    if (token && savedUsername) {
-      setIsAuthenticated(true);
-      setUsername(savedUsername);
-    }
+  const [username, setUsername] = useState<string | null>(() => {
+    return localStorage.getItem('admin_username');
+  });
 
-    setIsLoading(false);
-  }, []);
+  const [isLoading, setIsLoading] = useState(false);
 
   const login = async (username: string, password: string) => {
     try {
@@ -44,8 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setIsAuthenticated(true);
       setUsername(returnedUsername);
-    } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'Login failed');
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: string } } };
+      throw new Error(err.response?.data?.message || 'Login failed');
     }
   };
 
@@ -63,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {

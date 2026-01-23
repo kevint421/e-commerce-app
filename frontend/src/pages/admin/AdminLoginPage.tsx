@@ -19,8 +19,9 @@ export function AdminLoginPage() {
       await login(username, password);
       toast.success('Login successful');
       navigate('/admin/analytics');
-    } catch (error: any) {
-      toast.error(error.message || 'Login failed');
+    } catch (error) {
+      const err = error as Error;
+      toast.error(err.message || 'Login failed');
     } finally {
       setIsLoading(false);
     }

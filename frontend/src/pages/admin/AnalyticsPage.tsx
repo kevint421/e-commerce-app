@@ -49,7 +49,7 @@ export function AnalyticsPage() {
       try {
         const response = await apiClient.get('/admin/analytics');
         return response.data;
-      } catch (err: any) {
+      } catch (err) {
         toast.error('Failed to load analytics');
         throw err;
       }
