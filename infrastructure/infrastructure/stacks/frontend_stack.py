@@ -49,14 +49,6 @@ class FrontendStack(Stack):
             auto_delete_objects=True,  # Delete objects when bucket is deleted
             versioned=False,
             encryption=s3.BucketEncryption.S3_MANAGED,
-            cors=[
-                s3.CorsRule(
-                    allowed_methods=[s3.HttpMethods.GET, s3.HttpMethods.HEAD],
-                    allowed_origins=["*"],
-                    allowed_headers=["*"],
-                    max_age=3600,
-                )
-            ],
         )
 
         # ===== CloudFront Origin Access Identity =====
@@ -69,47 +61,6 @@ class FrontendStack(Stack):
 
         # Grant CloudFront read access to S3 bucket
         self.website_bucket.grant_read(origin_access_identity)
-
-        # ===== CloudFront Response Headers Policy for CORS =====
-        response_headers_policy = cloudfront.ResponseHeadersPolicy(
-            self,
-            "ResponseHeadersPolicy",
-            comment="CORS and security headers for frontend",
-            cors_behavior=cloudfront.ResponseHeadersCorsBehavior(
-                access_control_allow_origins=cloudfront.ResponseHeadersAccessControlAllowOrigins(
-                    items=["*"]
-                ),
-                access_control_allow_headers=cloudfront.ResponseHeadersAccessControlAllowHeaders(
-                    items=["*"]
-                ),
-                access_control_allow_methods=cloudfront.ResponseHeadersAccessControlAllowMethods(
-                    items=["GET", "HEAD", "OPTIONS"]
-                ),
-                access_control_allow_credentials=False,
-                origin_override=True,
-            ),
-            security_headers_behavior=cloudfront.ResponseSecurityHeadersBehavior(
-                content_type_options=cloudfront.ResponseHeadersContentTypeOptions(override=True),
-                frame_options=cloudfront.ResponseHeadersFrameOptions(
-                    frame_option=cloudfront.HeadersFrameOption.DENY,
-                    override=True
-                ),
-                referrer_policy=cloudfront.ResponseHeadersReferrerPolicy(
-                    referrer_policy=cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
-                    override=True
-                ),
-                strict_transport_security=cloudfront.ResponseHeadersStrictTransportSecurity(
-                    access_control_max_age=Duration.seconds(31536000),
-                    include_subdomains=True,
-                    override=True
-                ),
-                xss_protection=cloudfront.ResponseHeadersXSSProtection(
-                    protection=True,
-                    mode_block=True,
-                    override=True
-                ),
-            ),
-        )
 
         # ===== CloudFront Distribution =====
         # Create S3 origin for CloudFront
@@ -127,11 +78,10 @@ class FrontendStack(Stack):
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                 cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
                 cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
-                response_headers_policy=response_headers_policy,
                 compress=True,  # Enable gzip/brotli compression
             ),
             # Separate behavior for static assets (CSS, JS, images)
-            # Include CORS headers to support crossorigin attribute
+            # No error responses for assets - let them 404 naturally
             additional_behaviors={
                 "/assets/*": cloudfront.BehaviorOptions(
                     origin=s3_origin,
@@ -139,7 +89,6 @@ class FrontendStack(Stack):
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                     cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
                     cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
-                    response_headers_policy=response_headers_policy,
                     compress=True,
                 ),
                 "/vite.svg": cloudfront.BehaviorOptions(
@@ -148,7 +97,6 @@ class FrontendStack(Stack):
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                     cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
                     cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
-                    response_headers_policy=response_headers_policy,
                     compress=True,
                 ),
             },
