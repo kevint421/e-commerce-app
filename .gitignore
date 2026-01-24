@@ -73,9 +73,10 @@ Thumbs.db
 !package.json
 !package-lock.json
 
-# CDK specific
+# CDK specific - ignore compiled JS in infrastructure directory only
 *.d.ts
-*.js
+infrastructure/**/*.js
+!infrastructure/**/*.config.js
 
 # Python specific
 *.egg-info/
