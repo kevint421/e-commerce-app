@@ -79,6 +79,10 @@ export class InventoryRepository {
       }
 
       const { PK, ...inventory } = response.Item as DynamoDBInventoryItem;
+      // Ensure reserved attribute exists (backward compatibility)
+      if (inventory.reserved === undefined) {
+        inventory.reserved = 0;
+      }
       return inventory as Inventory;
     } catch (error) {
       return handleDynamoDBError(error);
@@ -112,8 +116,10 @@ export class InventoryRepository {
               ':expectedVersion': expectedVersion,
               ':zero': 0,
             },
+            // Use attribute_exists OR handle missing reserved by checking if attribute exists
             ConditionExpression:
-              'version = :expectedVersion AND (quantity - if_not_exists(reserved, :zero)) >= :qty AND quantity >= :zero',
+              'version = :expectedVersion AND attribute_exists(PK) AND ' +
+              '(attribute_not_exists(reserved) OR (quantity - reserved >= :qty))',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -160,7 +166,8 @@ export class InventoryRepository {
               ':zero': 0,
             },
             ConditionExpression:
-              'version = :expectedVersion AND if_not_exists(reserved, :zero) >= :qty',
+              'version = :expectedVersion AND attribute_exists(PK) AND ' +
+              '(attribute_not_exists(reserved) OR reserved >= :qty)',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -206,7 +213,8 @@ export class InventoryRepository {
               ':zero': 0,
             },
             ConditionExpression:
-              'version = :expectedVersion AND if_not_exists(reserved, :zero) >= :qty',
+              'version = :expectedVersion AND attribute_exists(PK) AND ' +
+              '(attribute_not_exists(reserved) OR reserved >= :qty)',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -292,6 +300,10 @@ export class InventoryRepository {
 
       const items = (response.Items || []).map((item) => {
         const { PK, ...inventory } = item as DynamoDBInventoryItem;
+        // Ensure reserved attribute exists (backward compatibility)
+        if (inventory.reserved === undefined) {
+          inventory.reserved = 0;
+        }
         return inventory as Inventory;
       });
 
