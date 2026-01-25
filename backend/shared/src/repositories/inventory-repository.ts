@@ -104,7 +104,7 @@ export class InventoryRepository {
             TableName: this.tableName,
             Key: { PK: inventoryId },
             UpdateExpression:
-              'SET reserved = reserved + :qty, version = version + :one, updatedAt = :now',
+              'SET reserved = if_not_exists(reserved, :zero) + :qty, version = version + :one, updatedAt = :now',
             ExpressionAttributeValues: {
               ':qty': quantity,
               ':one': 1,
@@ -113,7 +113,7 @@ export class InventoryRepository {
               ':zero': 0,
             },
             ConditionExpression:
-              'version = :expectedVersion AND (quantity - reserved) >= :qty AND quantity >= :zero',
+              'version = :expectedVersion AND (quantity - if_not_exists(reserved, :zero)) >= :qty AND quantity >= :zero',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -151,7 +151,7 @@ export class InventoryRepository {
             TableName: this.tableName,
             Key: { PK: inventoryId },
             UpdateExpression:
-              'SET reserved = reserved - :qty, version = version + :one, updatedAt = :now',
+              'SET reserved = if_not_exists(reserved, :zero) - :qty, version = version + :one, updatedAt = :now',
             ExpressionAttributeValues: {
               ':qty': quantity,
               ':one': 1,
@@ -160,7 +160,7 @@ export class InventoryRepository {
               ':zero': 0,
             },
             ConditionExpression:
-              'version = :expectedVersion AND reserved >= :qty AND reserved >= :zero',
+              'version = :expectedVersion AND if_not_exists(reserved, :zero) >= :qty',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -197,7 +197,7 @@ export class InventoryRepository {
             TableName: this.tableName,
             Key: { PK: inventoryId },
             UpdateExpression:
-              'SET reserved = reserved - :qty, version = version + :one, updatedAt = :now',
+              'SET reserved = if_not_exists(reserved, :zero) - :qty, version = version + :one, updatedAt = :now',
             ExpressionAttributeValues: {
               ':qty': quantity,
               ':one': 1,
@@ -206,7 +206,7 @@ export class InventoryRepository {
               ':zero': 0,
             },
             ConditionExpression:
-              'version = :expectedVersion AND reserved >= :qty AND reserved >= :zero',
+              'version = :expectedVersion AND if_not_exists(reserved, :zero) >= :qty',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -310,7 +310,7 @@ export class InventoryRepository {
    */
   async getTotalAvailableQuantity(productId: string): Promise<number> {
     const result = await this.getByProductId(productId);
-    return result.items.reduce((total, inv) => total + (inv.quantity - inv.reserved), 0);
+    return result.items.reduce((total, inv) => total + (inv.quantity - (inv.reserved || 0)), 0);
   }
 
   /**
@@ -323,7 +323,7 @@ export class InventoryRepository {
     const result = await this.getByProductId(productId);
 
     // Find first warehouse with sufficient available stock (quantity - reserved)
-    const warehouse = result.items.find((inv) => (inv.quantity - inv.reserved) >= requiredQuantity);
+    const warehouse = result.items.find((inv) => (inv.quantity - (inv.reserved || 0)) >= requiredQuantity);
 
     return warehouse || null;
   }
