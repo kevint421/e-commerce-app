@@ -77,7 +77,7 @@ export function handleDynamoDBError(error: any): never {
 
   if (error.name === 'ValidationException') {
     throw new DynamoDBError(
-      'Invalid request parameters',
+      `Invalid request parameters: ${error.message || 'No details available'}`,
       'VALIDATION_ERROR',
       400
     );

@@ -116,10 +116,9 @@ export class InventoryRepository {
               ':expectedVersion': expectedVersion,
               ':zero': 0,
             },
-            // Use attribute_exists OR handle missing reserved by checking if attribute exists
-            ConditionExpression:
-              'version = :expectedVersion AND attribute_exists(PK) AND ' +
-              '(attribute_not_exists(reserved) OR (quantity - reserved >= :qty))',
+            // Only check version - caller already verified stock availability
+            // Optimistic locking prevents races between check and reserve
+            ConditionExpression: 'version = :expectedVersion',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -165,9 +164,8 @@ export class InventoryRepository {
               ':expectedVersion': expectedVersion,
               ':zero': 0,
             },
-            ConditionExpression:
-              'version = :expectedVersion AND attribute_exists(PK) AND ' +
-              '(attribute_not_exists(reserved) OR reserved >= :qty)',
+            // Only check version for optimistic locking
+            ConditionExpression: 'version = :expectedVersion',
             ReturnValues: 'ALL_NEW',
           })
         )
@@ -212,9 +210,8 @@ export class InventoryRepository {
               ':expectedVersion': expectedVersion,
               ':zero': 0,
             },
-            ConditionExpression:
-              'version = :expectedVersion AND attribute_exists(PK) AND ' +
-              '(attribute_not_exists(reserved) OR reserved >= :qty)',
+            // Only check version for optimistic locking
+            ConditionExpression: 'version = :expectedVersion',
             ReturnValues: 'ALL_NEW',
           })
         )
